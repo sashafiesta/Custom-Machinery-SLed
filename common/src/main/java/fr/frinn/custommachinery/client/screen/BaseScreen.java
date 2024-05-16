@@ -1,38 +1,38 @@
 package fr.frinn.custommachinery.client.screen;
 
-import com.mojang.datafixers.util.Pair;
 import fr.frinn.custommachinery.CustomMachinery;
 import fr.frinn.custommachinery.client.screen.popup.PopupScreen;
+import fr.frinn.custommachinery.common.util.LRU;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Supplier;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 
 public abstract class BaseScreen extends Screen {
 
     private static final ResourceLocation BLANK_BACKGROUND = new ResourceLocation(CustomMachinery.MODID, "textures/gui/background.png");
 
-    private final List<Pair<DragType, Rectangle>> draggingAreas = new ArrayList<>();
-    public final int xSize;
-    public final int ySize;
+    public final Minecraft mc = Minecraft.getInstance();
 
-    private int xPos;
-    private int yPos;
-    private double xOffset = 0;
-    private double yOffset = 0;
-    private double widthOffset = 0;
-    private double heightOffset = 0;
-    private DragType currentDragType = DragType.NONE;
+    //Position of the top left corner of the popup.
+    public int x;
+    public int y;
 
-    @Nullable
-    private PopupScreen popup = null;
+    //Size of the screen, not same as width/height which is the size of MC windows.
+    public int xSize;
+    public int ySize;
+    private final LRU<PopupScreen> popups = new LRU<>();
+    private final Map<PopupScreen, String> popupToId = new HashMap<>();
 
     public BaseScreen(Component component, int xSize, int ySize) {
         super(component);
@@ -40,130 +40,97 @@ public abstract class BaseScreen extends Screen {
         this.ySize = ySize;
     }
 
-    public int getX() {
-        return this.xPos + (int)this.xOffset;
-    }
-
-    public int getY() {
-        return this.yPos + (int)this.yOffset;
-    }
-
-    public int getWidth() {
-        return this.xSize + (int)this.widthOffset;
-    }
-
-    public int getHeight() {
-        return this.ySize + (int)this.heightOffset;
-    }
-
     public void openPopup(PopupScreen popup) {
-        this.popup = popup;
-        this.popup.setParent(this);
-        this.popup.init(Minecraft.getInstance(), this.width, this.height);
+        if(this.popups.contains(popup))
+            return;
+        this.setFocused(null);
+        this.popups.add(popup);
+        popup.init(Minecraft.getInstance(), this.width, this.height);
     }
 
-    public void closePopup() {
-        this.popup = null;
+    //Prevents opening another popup with same id
+    public void openPopup(PopupScreen popup, String id) {
+        if(this.popupToId.containsValue(id))
+            return;
+        this.popupToId.put(popup, id);
+        this.openPopup(popup);
     }
 
-    public void addDraggingArea(DragType type, Rectangle rectangle) {
-        this.draggingAreas.add(Pair.of(type, rectangle));
+    public void closePopup(PopupScreen popup) {
+        popup.closed();
+        this.popups.remove(popup);
+        this.popupToId.remove(popup);
     }
 
-    public DragType getDragType(double mouseX, double mouseY) {
-        for(Pair<DragType, Rectangle> pair : this.draggingAreas) {
-            if(pair.getSecond().isIn(mouseX, mouseY))
-                return pair.getFirst();
-        }
-        return DragType.NONE;
+    public Collection<PopupScreen> popups() {
+        return this.popups;
     }
 
-    public void baseMoveDraggingArea() {
-        addDraggingArea(DragType.MOVE, new Rectangle(() -> this.getX() + 2, () -> this.getX() + this.getWidth() - 2, () -> this.getY() + 2, () -> this.getY() + 10));
+    @Nullable
+    public PopupScreen getPopupUnderMouse(double mouseX, double mouseY) {
+        return this.popups.stream()
+                .filter(popup -> mouseX >= popup.x && mouseX <= popup.x + popup.xSize && mouseY >= popup.y && mouseY <= popup.y + popup.ySize)
+                .findFirst()
+                .orElse(null);
     }
 
-    public void baseSizeDraggingArea(int margin) {
-        addDraggingArea(DragType.TOP, new Rectangle(() -> this.getX() + margin, () -> this.getX() + this.getWidth() - margin, () -> this.getY() - margin, () -> this.getY() + margin));
-        addDraggingArea(DragType.TOP_LEFT, new Rectangle(() -> this.getX() - margin, () -> this.getX() + margin, () -> this.getY() - margin, () -> this.getY() + margin));
-        addDraggingArea(DragType.TOP_RIGHT, new Rectangle(() -> this.getX() + this.getWidth() - margin, () -> this.getX() + this.getWidth() + margin, () -> this.getY() - margin, () -> this.getY() + margin));
-        addDraggingArea(DragType.LEFT, new Rectangle(() -> this.getX() - margin, () -> this.getX() + margin, () -> this.getY() + margin, () -> this.getY() + this.getHeight() - margin));
-        addDraggingArea(DragType.RIGHT, new Rectangle(() -> this.getX() + this.getWidth() - margin, () -> this.getX() + this.getWidth() + margin, () -> this.getY() + margin, () -> this.getY() + this.getHeight() - margin));
-        addDraggingArea(DragType.BOTTOM, new Rectangle(() -> this.getX() + margin, () -> this.getX() + this.getWidth() - margin, () -> this.getY() + this.getHeight() - margin, () -> this.getY() + this.getHeight() + margin));
-        addDraggingArea(DragType.BOTTOM_LEFT, new Rectangle(() -> this.getX() - margin, () -> this.getX() + margin, () -> this.getY() + this.getHeight() - margin, () -> this.getY() + this.getHeight() + margin));
-        addDraggingArea(DragType.BOTTOM_RIGHT, new Rectangle(() -> this.getX() + this.getWidth() - margin, () -> this.getX() + this.getWidth() + margin, () -> this.getY() + this.getHeight() - margin, () -> this.getY() + this.getHeight() + margin));
+    @Override
+    public void removed() {
+        this.popups.forEach(PopupScreen::closed);
     }
 
     @Override
     protected void init() {
-        this.draggingAreas.clear();
-        this.xPos = (this.width - this.xSize) / 2;
-        this.yPos = (this.height - this.ySize) / 2;
-        if(this.popup != null)
-            this.popup.init(Minecraft.getInstance(), this.width, this.height);
+        this.x = (this.mc.getWindow().getGuiScaledWidth() - this.xSize) / 2;
+        this.y = (this.mc.getWindow().getGuiScaledHeight() - this.ySize) / 2;
+        this.popups.forEach(popup -> popup.init(Minecraft.getInstance(), this.width, this.height));
+    }
+
+    @Override
+    public void resize(Minecraft minecraft, int width, int height) {
+        super.resize(minecraft, width, height);
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-        renderBackground(graphics);
+        this.renderBackground(graphics);
         graphics.pose().pushPose();
-        graphics.pose().translate(this.xOffset, this.yOffset, 0);
         super.render(graphics, mouseX, mouseY, partialTicks);
-        if(this.popup != null)
-            this.popup.render(graphics, mouseX, mouseY, partialTicks);
+        for(Iterator<PopupScreen> iterator = this.popups.descendingIterator(); iterator.hasNext();) {
+            graphics.pose().translate(0, 0, 165); //Items are rendered at z=150, tooltips z=400
+            iterator.next().render(graphics, mouseX, mouseY, partialTicks);
+        }
         graphics.pose().popPose();
     }
 
     @Override
-    public void renderBackground(GuiGraphics graphics) {
-
-    }
-
-    @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if(this.popup != null)
-            return this.popup.mouseClicked(mouseX, mouseY, button);
-        if(super.mouseClicked(mouseX, mouseY, button))
-            return true;
-        this.currentDragType = getDragType(mouseX, mouseY);
-        if(this.currentDragType != DragType.NONE)
-            setDragging(true);
-        return false;
+        for(PopupScreen popup : this.popups) {
+            if(popup.isMouseOver(mouseX, mouseY)) {
+                this.popups.moveUp(popup);
+                return popup.mouseClicked(mouseX, mouseY, button);
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        this.setDragging(false);
-        this.currentDragType = DragType.NONE;
-        if(this.popup != null)
-            return this.popup.mouseReleased(mouseX, mouseY, button);
+        for(PopupScreen popup : this.popups) {
+            if(popup.isMouseOver(mouseX, mouseY)) {
+                this.popups.moveUp(popup);
+                return popup.mouseReleased(mouseX, mouseY, button);
+            }
+        }
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if(this.popup != null)
-            return this.popup.mouseDragged(mouseX, mouseY, button, dragX, dragY);
-        if(this.isDragging() && button == 0 && this.currentDragType != DragType.NONE) {
-            switch(this.currentDragType) {
-                case MOVE -> {
-                    this.xOffset += dragX;
-                    this.yOffset += dragY;
-                }
-                case TOP -> {
-                    this.yOffset = Math.min(0, this.yOffset + dragY);
-                    this.heightOffset = Math.max(0, this.heightOffset - dragY);
-                }
-                case BOTTOM -> this.heightOffset = Math.max(0, this.heightOffset + dragY);
-                case LEFT -> {
-                    this.widthOffset = Math.max(0, this.widthOffset - dragX);
-                    if(this.widthOffset > 0)
-                        this.xOffset = Math.min(0, this.xOffset + dragX);
-                }
-                case RIGHT -> this.widthOffset = Math.max(0, this.widthOffset + dragX);
-                case TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT -> {
-                    this.widthOffset += dragX;
-                    this.heightOffset += dragY;
-                }
+        for(PopupScreen popup : this.popups) {
+            if(popup.isMouseOver(mouseX, mouseY)) {
+                this.popups.moveUp(popup);
+                return popup.mouseDragged(mouseX, mouseY, button, dragX, dragY);
             }
         }
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
@@ -171,8 +138,12 @@ public abstract class BaseScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        if(this.popup != null)
-            return this.popup.mouseScrolled(mouseX, mouseY, delta);
+        for(PopupScreen popup : this.popups) {
+            if(popup.isMouseOver(mouseX, mouseY)) {
+                this.popups.moveUp(popup);
+                return popup.mouseScrolled(mouseX, mouseY, delta);
+            }
+        }
         return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
@@ -182,8 +153,10 @@ public abstract class BaseScreen extends Screen {
             this.onClose();
             return true;
         }
-        if(this.popup != null)
-            return this.popup.keyPressed(keyCode, scanCode, modifiers);
+        for(PopupScreen popup : this.popups) {
+            if(popup.keyPressed(keyCode, scanCode, modifiers))
+                return true;
+        }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
@@ -193,9 +166,34 @@ public abstract class BaseScreen extends Screen {
             this.onClose();
             return true;
         }
-        if(this.popup != null)
-            return this.popup.keyReleased(keyCode, scanCode, modifiers);
+        for(PopupScreen popup : this.popups) {
+            if(popup.keyReleased(keyCode, scanCode, modifiers))
+                return true;
+        }
         return super.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        for(PopupScreen popup : this.popups) {
+            if(popup.charTyped(codePoint, modifiers))
+                return true;
+        }
+        return super.charTyped(codePoint, modifiers);
+    }
+
+    @Override
+    public boolean isMouseOver(double mouseX, double mouseY) {
+        if(this.getPopupUnderMouse(mouseX, mouseY) != null)
+            return false;
+        return mouseX >= this.x && mouseX <= this.x + this.xSize && mouseY >= this.y && mouseY <= this.y + this.ySize;
+    }
+
+    @Override
+    public void setFocused(@Nullable GuiEventListener focused) {
+        super.setFocused(focused);
+        if(focused != null)
+            this.popups.forEach(popup -> popup.setFocused(null));
     }
 
     @Override
@@ -224,39 +222,21 @@ public abstract class BaseScreen extends Screen {
         graphics.blit(BLANK_BACKGROUND, x + width - 4, y + height - 4, 4, 4, 4, 4, 4, 4, 8, 8);
     }
 
-    public enum DragType {
-        MOVE,
-        TOP_LEFT,
-        TOP,
-        TOP_RIGHT,
-        LEFT,
-        RIGHT,
-        BOTTOM_LEFT,
-        BOTTOM,
-        BOTTOM_RIGHT,
-        NONE
+    public static void drawCenteredString(GuiGraphics graphics, Font font, Component text, int x, int y, int color, boolean shadow) {
+        graphics.drawString(font, text, x - font.width(text) / 2, y - font.lineHeight / 2, color, shadow);
     }
 
-    public static class Rectangle {
+    public static void drawCenteredScaledString(GuiGraphics graphics, Font font, Component text, int x, int y, float scale, int color, boolean shadow) {
+        graphics.pose().pushPose();
+        graphics.pose().scale(scale, scale, 0);
+        graphics.drawString(font, text, (int)((x - (font.width(text) * scale) / 2) / scale), (int)((y - font.lineHeight / 2) / scale), color, shadow);
+        graphics.pose().popPose();
+    }
 
-        private final Supplier<Integer> left;
-        private final Supplier<Integer> right;
-        private final Supplier<Integer> top;
-        private final Supplier<Integer> bottom;
-
-        public Rectangle(Supplier<Integer> left, Supplier<Integer> right, Supplier<Integer> top, Supplier<Integer> bottom) {
-            this.left = left;
-            this.right = right;
-            this.top = top;
-            this.bottom = bottom;
-        }
-
-        public boolean isIn(double x, double y) {
-            return x >= this.left.get() && x <= this.right.get() && y >= this.top.get() && y <= this.bottom.get();
-        }
-
-        public void render(GuiGraphics graphics, int color) {
-            graphics.fill(this.left.get(), this.top.get(), this.right.get(), this.bottom.get(), color);
-        }
+    public static void drawScaledString(GuiGraphics graphics, Font font, Component text, int x, int y, float scale, int color, boolean shadow) {
+        graphics.pose().pushPose();
+        graphics.pose().scale(scale, scale, 0);
+        graphics.drawString(font, text, (int)(x / scale), (int)(y / scale), color, shadow);
+        graphics.pose().popPose();
     }
 }
